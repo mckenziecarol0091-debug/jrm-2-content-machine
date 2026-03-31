@@ -35,5 +35,8 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' .env
 
-      - name: Run pipeline
-        run: python script_writer.py
+      - name: Run trend scout (scan competitors for outliers)
+        run: python trend_scout.py
+
+      - name: Run script writer (generate scripts from outliers)
+        run: python script_writer.py --from-sheet
