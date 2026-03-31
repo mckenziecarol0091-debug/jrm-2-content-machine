@@ -1,4 +1,4 @@
-name: Daily Content Pipeline
+name: Daily Content Pipeline v2
 
 on:
   schedule:
