@@ -1,0 +1,8 @@
+.env
+jrm-social-ce1b2857fb3c.json
+credentials.json
+node_modules/
+scripts/
+__pycache__/
+*.pyc
+.claude/
