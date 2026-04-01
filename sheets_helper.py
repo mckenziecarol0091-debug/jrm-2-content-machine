@@ -16,10 +16,10 @@ def get_sheet(tab_name):
     return spreadsheet.worksheet(tab_name)
 
 
-def append_rows(tab_name, rows):
+def append_rows(tab_name, rows, value_input_option="USER_ENTERED"):
     """Append a list of row-lists to the given tab."""
     ws = get_sheet(tab_name)
-    ws.append_rows(rows, value_input_option="USER_ENTERED")
+    ws.append_rows(rows, value_input_option=value_input_option)
     return len(rows)
 
 
