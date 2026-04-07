@@ -67,6 +67,20 @@ PILLAR_KEYWORDS = {
         "real estate funnel", "real estate ai", "cold calling", "door knocking",
         "isa", "inside sales", "expired listing", "fsbo", "zillow", "realtor.com",
         "keller williams", "exp realty", "compass", "brokerage",
+        # Real estate lead gen & CRM
+        "sphere of influence", "soi", "database", "nurture", "drip",
+        "text blast", "speed to lead", "internet leads", "online leads",
+        "circle prospecting", "just listed", "just sold", "farming",
+        "geographic farming", "buyer leads", "seller leads", "listing leads",
+        "real estate crm", "kvcore", "follow up boss", "followupboss",
+        "sierra interactive", "boomtown", "chime", "lofty", "cinc",
+        "real estate webinar", "real estate funnel", "idx", "home valuation",
+        "seller funnel", "buyer funnel", "real estate ads", "google ads realtor",
+        "facebook ads real estate", "instagram real estate", "real estate marketing",
+        # AI for realtors
+        "ai for realtors", "ai real estate", "chatgpt real estate",
+        "ai listing description", "ai follow up", "ai for agents",
+        "ai prospecting", "virtual assistant real estate",
     ],
     # Pillar 4: Go High Level (GHL)
     "ghl": [
@@ -77,6 +91,13 @@ PILLAR_KEYWORDS = {
         "booking", "calendar", "reputation management", "review", "reviews",
         "white label", "whitelabel", "saas mode", "agency", "click funnels",
         "clickfunnels", "kartra", "hubspot",
+        # GHL for real estate
+        "ghl real estate", "highlevel real estate", "ghl realtor",
+        "ghl funnel", "ghl automation", "ghl workflow", "ghl snapshot",
+        "ghl landing page", "ghl sms", "ghl email", "ghl pipeline",
+        "ghl for agents", "ghl lead gen", "ghl webinar",
+        "missed call text back", "ghl review", "ghl reputation",
+        "conversation ai", "ghl bot", "ghl ai",
     ],
 }
 
