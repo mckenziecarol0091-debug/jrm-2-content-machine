@@ -1,4 +1,5 @@
 import os
+import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
@@ -56,3 +57,43 @@ def read_all(tab_name):
         else:
             clean_headers.append(h)
     return [dict(zip(clean_headers, row)) for row in rows[1:]]
+
+
+def delete_old_rows(tab_name, date_col_index=0, days=7):
+    """Delete rows with a Date value older than `days` days ago.
+
+    Keeps the header row and any rows within the retention window.
+    Returns the number of rows deleted.
+    """
+    ws = get_sheet(tab_name)
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return 0
+
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    header = rows[0]
+    keep = []
+    deleted = 0
+    for row in rows[1:]:
+        row_date = row[date_col_index] if date_col_index < len(row) else ""
+        if row_date >= cutoff:
+            keep.append(row)
+        else:
+            deleted += 1
+
+    if deleted == 0:
+        return 0
+
+    # Rewrite: header + kept rows
+    ws.clear()
+    ws.update([header] + keep, value_input_option="RAW")
+    return deleted
+
+
+def get_existing_values(tab_name, col_index):
+    """Return a set of values from a specific column (0-indexed) in the tab."""
+    ws = get_sheet(tab_name)
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return set()
+    return {row[col_index] for row in rows[1:] if col_index < len(row)}

@@ -13,7 +13,7 @@ import re
 import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
-from sheets_helper import append_rows, read_all, clear_data_rows
+from sheets_helper import append_rows, read_all, delete_old_rows, get_existing_values
 
 load_dotenv()
 
@@ -215,7 +215,7 @@ def resolve_channel(yt, identifier_type, identifier):
     return None
 
 
-def get_recent_video_ids(yt, uploads_playlist_id, max_results=10):
+def get_recent_video_ids(yt, uploads_playlist_id, max_results=25):
     """Get recent video IDs from uploads playlist. 1 quota unit."""
     resp = yt.playlistItems().list(
         part="contentDetails",
@@ -225,18 +225,25 @@ def get_recent_video_ids(yt, uploads_playlist_id, max_results=10):
     return [item["contentDetails"]["videoId"] for item in resp.get("items", [])]
 
 
-def get_video_details(yt, video_ids):
-    """Get stats and snippets for videos. 1 quota unit per 50 videos."""
+def get_video_details(yt, video_ids, cutoff_date=None):
+    """Get stats and snippets for videos. 1 quota unit per 50 videos.
+
+    If cutoff_date is provided, only returns videos published on or after that date.
+    """
     resp = yt.videos().list(
         part="statistics,snippet",
         id=",".join(video_ids),
     ).execute()
     results = []
     for item in resp.get("items", []):
+        published = item["snippet"]["publishedAt"][:10]  # "YYYY-MM-DD"
+        if cutoff_date and published < cutoff_date:
+            continue
         results.append({
             "video_id": item["id"],
             "title": item["snippet"]["title"],
             "description": item["snippet"].get("description", ""),
+            "published": published,
             "views": int(item["statistics"].get("viewCount", 0)),
             "channel": item["snippet"]["channelTitle"],
         })
@@ -271,16 +278,17 @@ BRAND_MATCH_MIN = 3.0     # minimum brand score to qualify as brand match
 
 
 def scout_all(brand_voice):
-    """Scan competitor channels for Outlier and Brand Match videos."""
+    """Scan competitor channels for Outlier and Brand Match videos from the last 7 days."""
     yt = get_youtube()
-    today = datetime.date.today().isoformat()
+    cutoff_date = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
     extra_kw = _extra_keywords_from_voice(brand_voice)
 
     outlier_results = []
     brand_results = []
 
     competitors = load_competitors()
-    print(f"  Loaded {len(competitors)} competitors from Competitor Tracker sheet.\n")
+    print(f"  Loaded {len(competitors)} competitors from Competitor Tracker sheet.")
+    print(f"  Scanning videos published since {cutoff_date}\n")
 
     for comp in competitors:
         name = comp["name"]
@@ -298,7 +306,7 @@ def scout_all(brand_voice):
             continue
 
         try:
-            video_ids = get_recent_video_ids(yt, channel["uploads_playlist"], max_results=10)
+            video_ids = get_recent_video_ids(yt, channel["uploads_playlist"], max_results=25)
         except Exception as e:
             print(f"    Error fetching videos: {e}, skipping.")
             continue
@@ -306,7 +314,10 @@ def scout_all(brand_voice):
             print(f"    No videos found, skipping.")
             continue
 
-        videos = get_video_details(yt, video_ids)
+        videos = get_video_details(yt, video_ids, cutoff_date=cutoff_date)
+        if not videos:
+            print(f"    No videos in the last 7 days, skipping.")
+            continue
         videos = score_videos(videos)
 
         n_outliers = 0
@@ -317,7 +328,7 @@ def scout_all(brand_voice):
             is_outlier = v["outlier_score"] >= OUTLIER_THRESHOLD
 
             row = {
-                "date": today,
+                "date": v["published"],
                 "platform": "YouTube",
                 "channel": v["channel"],
                 "title": v["title"],
@@ -353,7 +364,25 @@ def scout_all(brand_voice):
 
 
 def write_to_sheet(results):
-    """Append result rows to the Daily Outliers tab."""
+    """Append new result rows to the Daily Outliers tab, skipping duplicates by URL.
+
+    Rows are sorted by date newest first before writing.
+    """
+    # Get existing URLs to avoid duplicates
+    existing_urls = get_existing_values(TAB, 8)  # URL is column index 8
+
+    # Filter out duplicates
+    new_results = [r for r in results if r["url"] not in existing_urls]
+    skipped = len(results) - len(new_results)
+    if skipped:
+        print(f"  Skipped {skipped} duplicate(s) already in sheet.")
+
+    if not new_results:
+        return 0
+
+    # Sort by date newest first
+    new_results.sort(key=lambda x: x["date"], reverse=True)
+
     rows = [
         [
             r["date"],
@@ -367,20 +396,20 @@ def write_to_sheet(results):
             r["url"],
             r["hook_transcript"],
         ]
-        for r in results
+        for r in new_results
     ]
     count = append_rows(TAB, rows)
     return count
 
 
 def run():
-    print("Clearing previous data from Daily Outliers, Content Calendar, and Brand Match Ideas...")
-    cleared_outliers = clear_data_rows("Daily Outliers")
-    cleared_calendar = clear_data_rows("Content Calendar")
-    cleared_brand = clear_data_rows("Brand Match Ideas")
-    print(f"  Cleared {cleared_outliers} rows from Daily Outliers")
-    print(f"  Cleared {cleared_calendar} rows from Content Calendar")
-    print(f"  Cleared {cleared_brand} rows from Brand Match Ideas\n")
+    print("Pruning rows older than 7 days from Daily Outliers, Content Calendar, and Brand Match Ideas...")
+    pruned_outliers = delete_old_rows("Daily Outliers", date_col_index=0, days=7)
+    pruned_calendar = delete_old_rows("Content Calendar", date_col_index=0, days=7)
+    pruned_brand = delete_old_rows("Brand Match Ideas", date_col_index=0, days=7)
+    print(f"  Pruned {pruned_outliers} old rows from Daily Outliers")
+    print(f"  Pruned {pruned_calendar} old rows from Content Calendar")
+    print(f"  Pruned {pruned_brand} old rows from Brand Match Ideas\n")
 
     print("Loading Brand Voice for brand-match scoring...")
     brand_voice = load_brand_voice()
@@ -393,11 +422,11 @@ def run():
         return results
     print(f"\nWriting {len(results)} results to '{TAB}' tab...")
     count = write_to_sheet(results)
-    print(f"Done — {count} rows written to Google Sheets.")
+    print(f"Done — {count} new rows written to Google Sheets.")
 
     print("\nVerifying — last entries from sheet:")
     records = read_all(TAB)
-    for r in records[-min(len(results), 5):]:
+    for r in records[:min(len(results), 5)]:
         print(f"  [{r.get('Type','?'):>12}] {r.get('Outlier Score',''):>4}x | B:{r.get('Brand Score',''):>4} | {r.get('Channel','?'):<25} | {r.get('Title','?')}")
 
     return results
