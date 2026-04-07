@@ -405,6 +405,7 @@ if __name__ == "__main__":
                 "views": int(str(r.get("Views", 0)).replace(",", "")),
                 "hook_transcript": r.get("Hook Transcript", ""),
                 "type": r.get("Type", "Outlier"),
+                "pillar": r.get("Pillar", ""),
             }
             for r in records
         ]

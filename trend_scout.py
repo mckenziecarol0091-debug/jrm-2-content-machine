@@ -5,7 +5,9 @@ finds two types of videos and writes results to the 'Daily Outliers' tab:
   1. OUTLIER  — videos scoring ≥2x the channel's recent average views
   2. BRAND MATCH — videos that align with the Brand Voice even if not outliers
 
-Columns: Date, Platform, Channel, Title, Views, Outlier Score, Brand Score, Type, URL, Hook Transcript
+Results are balanced across the 4 content pillars (top 5 each = 20 total).
+
+Columns: Date, Pillar, Platform, Channel, Title, Views, Outlier Score, Brand Score, Type, URL, Hook Transcript
 """
 
 import os
@@ -114,6 +116,31 @@ VOICE_KEYWORDS = [
     "what i learned", "real talk", "let me show", "tutorial",
     "beginner", "guide", "walkthrough",
 ]
+
+
+PILLAR_NAMES = {
+    "ai_tools": "AI Tools & Automation",
+    "ai_money": "How to Make Money with AI",
+    "real_estate": "Real Estate + AI",
+    "ghl": "Go High Level",
+}
+
+# Ordered list for consistent pillar sorting in output
+PILLAR_ORDER = ["AI Tools & Automation", "How to Make Money with AI",
+                "Real Estate + AI", "Go High Level"]
+
+
+def detect_pillar(video):
+    """Detect the best-matching content pillar for a video."""
+    text = (video["title"] + " " + video.get("description", "")).lower()
+    best_key = "ai_tools"
+    best_hits = 0
+    for key, kw_list in PILLAR_KEYWORDS.items():
+        hits = sum(1 for kw in kw_list if kw in text)
+        if hits > best_hits:
+            best_hits = hits
+            best_key = key
+    return PILLAR_NAMES[best_key]
 
 
 def load_brand_voice():
@@ -298,14 +325,21 @@ OUTLIER_THRESHOLD = 2.0   # ≥2x channel average = outlier
 BRAND_MATCH_MIN = 3.0     # minimum brand score to qualify as brand match
 
 
+RESULTS_PER_PILLAR = 5
+
+
 def scout_all(brand_voice):
-    """Scan competitor channels for Outlier and Brand Match videos from the last 7 days."""
+    """Scan competitor channels and return a balanced mix across all 4 pillars.
+
+    Collects all qualifying videos (Outlier or Brand Match), assigns each to
+    its best-matching pillar, then takes the top 5 from each pillar ranked by
+    a combined score (outlier_score + brand_score).
+    """
     yt = get_youtube()
     cutoff_date = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
     extra_kw = _extra_keywords_from_voice(brand_voice)
 
-    outlier_results = []
-    brand_results = []
+    all_candidates = []
 
     competitors = load_competitors()
     print(f"  Loaded {len(competitors)} competitors from Competitor Tracker sheet.")
@@ -347,50 +381,61 @@ def scout_all(brand_voice):
             brand_score = score_brand_match(v, brand_voice, extra_kw)
             v["brand_score"] = brand_score
             is_outlier = v["outlier_score"] >= OUTLIER_THRESHOLD
+            is_brand = brand_score >= BRAND_MATCH_MIN
+
+            if not is_outlier and not is_brand:
+                continue
+
+            pillar = detect_pillar(v)
 
             row = {
                 "date": v["published"],
+                "pillar": pillar,
                 "platform": "YouTube",
                 "channel": v["channel"],
                 "title": v["title"],
                 "views": v["views"],
                 "outlier_score": v["outlier_score"],
                 "brand_score": brand_score,
+                "type": "Outlier" if is_outlier else "Brand Match",
                 "url": f"https://youtube.com/watch?v={v['video_id']}",
                 "hook_transcript": extract_hook(v.get("description", "")),
             }
+            all_candidates.append(row)
 
             if is_outlier:
-                row["type"] = "Outlier"
-                outlier_results.append(row)
                 n_outliers += 1
-            elif brand_score >= BRAND_MATCH_MIN:
-                row["type"] = "Brand Match"
-                brand_results.append(row)
+            else:
                 n_brand += 1
 
         print(f"    {channel['channel_name']}: {n_outliers} outlier(s), {n_brand} brand match(es)")
 
-    # Sort each group by its primary metric
-    outlier_results.sort(key=lambda x: x["outlier_score"], reverse=True)
-    brand_results.sort(key=lambda x: x["brand_score"], reverse=True)
+    # Group by pillar, take top 5 from each ranked by combined score
+    pillar_buckets = {p: [] for p in PILLAR_ORDER}
+    for row in all_candidates:
+        pillar_buckets[row["pillar"]].append(row)
 
-    # Keep top results from each group
-    outlier_results = outlier_results[:10]
-    brand_results = brand_results[:10]
+    combined = []
+    for pillar in PILLAR_ORDER:
+        bucket = pillar_buckets[pillar]
+        bucket.sort(key=lambda x: x["outlier_score"] + x["brand_score"], reverse=True)
+        top = bucket[:RESULTS_PER_PILLAR]
+        combined.extend(top)
+        n_o = sum(1 for r in top if r["type"] == "Outlier")
+        n_b = len(top) - n_o
+        print(f"  {pillar:30s}: {len(top)} selected ({n_o} outlier, {n_b} brand match) out of {len(bucket)} candidates")
 
-    combined = outlier_results + brand_results
-    print(f"\n  Totals: {len(outlier_results)} outliers, {len(brand_results)} brand matches")
+    print(f"\n  Total: {len(combined)} results across {len(PILLAR_ORDER)} pillars")
     return combined
 
 
 def write_to_sheet(results):
     """Append new result rows to the Daily Outliers tab, skipping duplicates by URL.
 
-    Rows are sorted by date newest first before writing.
+    Rows are sorted by pillar order then by combined score descending.
     """
-    # Get existing URLs to avoid duplicates
-    existing_urls = get_existing_values(TAB, 8)  # URL is column index 8
+    # Get existing URLs to avoid duplicates (URL is column index 9 with Pillar column)
+    existing_urls = get_existing_values(TAB, 9)
 
     # Filter out duplicates
     new_results = [r for r in results if r["url"] not in existing_urls]
@@ -401,12 +446,17 @@ def write_to_sheet(results):
     if not new_results:
         return 0
 
-    # Sort by date newest first
-    new_results.sort(key=lambda x: x["date"], reverse=True)
+    # Sort by pillar order, then by combined score descending within each pillar
+    pillar_rank = {p: i for i, p in enumerate(PILLAR_ORDER)}
+    new_results.sort(key=lambda x: (
+        pillar_rank.get(x["pillar"], 99),
+        -(x["outlier_score"] + x["brand_score"]),
+    ))
 
     rows = [
         [
             r["date"],
+            r["pillar"],
             r["platform"],
             r["channel"],
             r["title"],
@@ -445,9 +495,14 @@ def run():
     count = write_to_sheet(results)
     print(f"Done — {count} new rows written to Google Sheets.")
 
-    print("\nVerifying — last entries from sheet:")
+    print("\nVerifying — entries from sheet:")
     records = read_all(TAB)
-    for r in records[:min(len(results), 5)]:
+    current_pillar = None
+    for r in records[:min(len(results), 20)]:
+        pillar = r.get("Pillar", "?")
+        if pillar != current_pillar:
+            current_pillar = pillar
+            print(f"\n  --- {pillar} ---")
         print(f"  [{r.get('Type','?'):>12}] {r.get('Outlier Score',''):>4}x | B:{r.get('Brand Score',''):>4} | {r.get('Channel','?'):<25} | {r.get('Title','?')}")
 
     return results
