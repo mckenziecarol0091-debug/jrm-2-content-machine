@@ -1,9 +1,6 @@
 name: Daily Content Pipeline v3
 
 on:
-  schedule:
-    # 9 AM PST = 17:00 UTC, weekdays only (Mon-Fri)
-    - cron: '0 17 * * 1-5'
   workflow_dispatch: # allows manual trigger from GitHub UI
 
 jobs:
